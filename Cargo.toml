@@ -1,0 +1,10 @@
+[package]
+name = "tosys"
+version = "0.1.0"
+authors = ["longfangsong <longfangsong@icloud.com>"]
+
+[dependencies]
+bootloader_precompiled = "0.2.0"
+
+[package.metadata.bootimage]
+default-target = "target.json"
