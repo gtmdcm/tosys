@@ -4,30 +4,37 @@ pub struct Vga {
 }
 
 impl Vga {
-    pub fn print_char(&mut self, ch: u8) {
+    pub fn print_char(mut self, ch: u8) -> Vga {
         unsafe {
-            *self.vga_memory.offset(self.cursor as isize * 2) = ch;
-            *self.vga_memory.offset(self.cursor as isize * 2 + 1) = 0xb;
+            *self.vga_memory.offset(self.cursor * 2) = ch;
+            *self.vga_memory.offset(self.cursor * 2 + 1) = 0xb;
         }
         self.cursor += 1;
+        self
     }
-    pub fn print(&mut self, str: &[u8]) {
+    pub fn print(mut self, str: &[u8]) -> Vga {
         for (_, &byte) in str.iter().enumerate() {
-            self.print_char(byte)
+            self = self.print_char(byte)
         }
+        self
     }
-    pub fn print_int(&mut self, number: i64) {
-        if number < 0 {
-            self.print_char(b'-');
-            self.print_int(-number);
+    pub fn print_uint(mut self, number: u64) -> Vga {
+        if number < 10 {
+            self = self.print_char(number as u8 + b'0');
         } else {
-            if number < 10 {
-                self.print_char(number as u8 + b'0');
-            } else {
-                self.print_int(number / 10);
-                self.print_char((number % 10) as u8 + b'0');
-            }
+            self = self.print_uint(number / 10);
+            self = self.print_char((number % 10) as u8 + b'0');
         }
+        self
+    }
+    pub fn print_int(mut self, number: i64) -> Vga {
+        if number < 0 {
+            self = self.print_char(b'-');
+            self = self.print_int(-number);
+        } else {
+            self = self.print_uint(number as u64);
+        }
+        self
     }
 }
 
