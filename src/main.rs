@@ -1,60 +1,77 @@
 #![no_std]
-#![no_main]
+#![cfg_attr(not(test), no_main)]
+#![cfg_attr(test, allow(dead_code, unused_macros, unused_imports))]
+#![feature(abi_x86_interrupt)]
 
 #[macro_use]
 extern crate bootloader_precompiled;
+#[macro_use]
+extern crate lazy_static;
+extern crate pic8259_simple;
+extern crate spin;
+extern crate volatile;
+extern crate x86_64;
 
 use bootloader_precompiled::bootinfo;
 use core::panic::PanicInfo;
-use memory::free_page;
-use memory::pages_available;
+use interrupts::init_idt;
+use x86_64::PhysAddr;
+use x86_64::registers::control::Cr3;
+use x86_64::structures::paging::Page;
+use x86_64::structures::paging::PageTable;
+use x86_64::structures::paging::PageTableEntry;
+use x86_64::structures::paging::PageTableFlags;
+use x86_64::structures::paging::PhysFrame;
+use x86_64::structures::paging::RecursivePageTable;
+use x86_64::ux::u9;
+use x86_64::VirtAddr;
 
-mod drive;
-mod memory;
+#[macro_use]
+mod vga;
+mod gdt;
+mod interrupts;
+
 
 fn main(bootinfo: &'static bootinfo::BootInfo) -> ! {
-    const MEMORY_REGION_TYPE: [&[u8; 11]; 14] = [
-        b"Usable     ",
-        b"InUse      ",
-        b"Reserved   ",
-        b"??         ",
-        b"??         ",
-        b"bad        ",
-        b"kernel     ",
-        b"KernelStack",
-        b"PageTable  ",
-        b"Bootloader ",
-        b"FrameZero  ",
-        b"Empty      ",
-        b"BootInfo   ",
-        b"Package    "
-    ];
-    let mut vga: drive::vga::Vga = drive::vga::Vga::new();
-    vga.print_uint(bootinfo.memory_map.len() as u64)
-        .println(b"");
-    for i in 0..=14 {
-        vga.print_uint(i)
-            .print_char(b':')
-            .print(MEMORY_REGION_TYPE[bootinfo.memory_map[i as usize].region_type as usize])
-            .print_char(b',')
-            .print_uint(bootinfo.memory_map[i as usize].range.start_frame_number as u64)
-            .print(b" to ")
-            .print_uint(bootinfo.memory_map[i as usize].range.end_frame_number as u64)
-            .println(b"");
+//    meminfo(bootinfo);
+    gdt::init();
+    interrupts::init_idt();
+    loop {
+        x86_64::instructions::hlt();
     }
-    for i in 0..10000000 {}
+}
+
+fn meminfo(bootinfo: &'static bootinfo::BootInfo) {
+    println!("p4_table_addr: {:?}", bootinfo.p4_table_addr);
+    for index in 0..bootinfo.memory_map.len() - 1 {
+        println!("{:?}", bootinfo.memory_map[index]);
+    }
+    let page_table = unsafe { &mut *(bootinfo.p4_table_addr as *mut PageTable) };
+    page_table[2].set_addr(PhysAddr::new(bootinfo.memory_map[12].range.start_addr()), PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
+    for i in 0..=2 {
+        unsafe {
+            let pt = &*(bootinfo.p4_table_addr as *mut PageTable);
+            println!("{:?}", pt[i]);
+        }
+    }
     unsafe {
-        vga.print_uint(*((1048584 * 4096) as *mut u64));
-        for i in 0..10000000 {}
+        let pt = &*(bootinfo.p4_table_addr as *mut PageTable);
+        println!("{:?}", pt[511]);
     }
-//    free_page((1069) as *mut u8);
-//    vga.print_uint((1070 * 4096) as *mut u8 as u64);
-    loop {}
+    let addr = VirtAddr::new(bootinfo.p4_table_addr & 0x1FFFFFFFFFF | 0x03);
+    println!("{:?}/{:?}/{:?}/{:?}/{:?}", addr.p4_index(), addr.p3_index(), addr.p2_index(), addr.p1_index(), addr.page_offset());
+    let addr = VirtAddr::new(bootinfo.p4_table_addr);
+    println!("{:?}/{:?}/{:?}/{:?}/{:?}", addr.p4_index(), addr.p3_index(), addr.p2_index(), addr.p1_index(), addr.page_offset());
 }
 
 entry_point!(main);
 
+/// This function is called on paqnic.
+#[cfg(not(test))]
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    loop {}
+fn panic(info: &PanicInfo) -> ! {
+    println!("{}", info);
+    loop {
+        x86_64::instructions::hlt();
+    }
 }
