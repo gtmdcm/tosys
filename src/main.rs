@@ -12,56 +12,27 @@ extern crate spin;
 extern crate volatile;
 extern crate x86_64;
 
-use bootloader_precompiled::bootinfo;
 use core::panic::PanicInfo;
-use interrupts::init_idt;
-use x86_64::PhysAddr;
-use x86_64::registers::control::Cr3;
-use x86_64::structures::paging::Page;
-use x86_64::structures::paging::PageTable;
-use x86_64::structures::paging::PageTableEntry;
-use x86_64::structures::paging::PageTableFlags;
-use x86_64::structures::paging::PhysFrame;
-use x86_64::structures::paging::RecursivePageTable;
-use x86_64::ux::u9;
-use x86_64::VirtAddr;
+
+use bootloader_precompiled::bootinfo;
 
 #[macro_use]
 mod vga;
 mod gdt;
 mod interrupts;
-
+mod memory;
 
 fn main(bootinfo: &'static bootinfo::BootInfo) -> ! {
-//    meminfo(bootinfo);
     gdt::init();
-    interrupts::init_idt();
+    interrupts::init();
+    let mut recursive_page_table = memory::init(bootinfo.p4_table_addr as usize);
+    let mut frame_allocator = memory::init_frame_allocator(&bootinfo.memory_map);
+    memory::create_mapping(&mut recursive_page_table, &mut frame_allocator);
+    unsafe { (0xdeadbeaf900 as *mut u64).write_volatile(0xf021f077f065f04e) };
+
     loop {
         x86_64::instructions::hlt();
     }
-}
-
-fn meminfo(bootinfo: &'static bootinfo::BootInfo) {
-    println!("p4_table_addr: {:?}", bootinfo.p4_table_addr);
-    for index in 0..bootinfo.memory_map.len() - 1 {
-        println!("{:?}", bootinfo.memory_map[index]);
-    }
-    let page_table = unsafe { &mut *(bootinfo.p4_table_addr as *mut PageTable) };
-    page_table[2].set_addr(PhysAddr::new(bootinfo.memory_map[12].range.start_addr()), PageTableFlags::PRESENT | PageTableFlags::WRITABLE);
-    for i in 0..=2 {
-        unsafe {
-            let pt = &*(bootinfo.p4_table_addr as *mut PageTable);
-            println!("{:?}", pt[i]);
-        }
-    }
-    unsafe {
-        let pt = &*(bootinfo.p4_table_addr as *mut PageTable);
-        println!("{:?}", pt[511]);
-    }
-    let addr = VirtAddr::new(bootinfo.p4_table_addr & 0x1FFFFFFFFFF | 0x03);
-    println!("{:?}/{:?}/{:?}/{:?}/{:?}", addr.p4_index(), addr.p3_index(), addr.p2_index(), addr.p1_index(), addr.page_offset());
-    let addr = VirtAddr::new(bootinfo.p4_table_addr);
-    println!("{:?}/{:?}/{:?}/{:?}/{:?}", addr.p4_index(), addr.p3_index(), addr.p2_index(), addr.p1_index(), addr.page_offset());
 }
 
 entry_point!(main);
