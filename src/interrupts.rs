@@ -1,5 +1,6 @@
 use pic8259_simple::ChainedPics;
 use spin;
+use x86_64::instructions::port::Port;
 use x86_64::structures::idt::{InterruptStackFrame, InterruptDescriptorTable};
 use x86_64::structures::idt::PageFaultErrorCode;
 
@@ -17,7 +18,16 @@ extern "x86-interrupt" fn double_fault_handler(
     }
 }
 
+lazy_static! {
+    static ref timer_count: spin::Mutex<usize> = spin::Mutex::new(0usize);
+}
+
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: &mut InterruptStackFrame) {
+    let mut timer = timer_count.lock();
+    *timer += 1;
+    if *timer % 1000 == 0 {
+        print!(".");
+    }
     unsafe {
         PICS.lock().notify_end_of_interrupt(TIMER_INTERRUPT_ID);
     }
@@ -53,6 +63,20 @@ pub const KEYBOARD_INTERRUPT_ID: u8 = PIC_1_OFFSET + 1;
 pub static PICS: spin::Mutex<ChainedPics> =
     spin::Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
 
+fn set_clock_speed(frequency: u16) {
+    const STANDARD_FREQUENCY: usize = 1_193_182;
+    let mut port1: Port<u8> = Port::new(0x43);
+    let mut port2: Port<u8> = Port::new(0x40);
+    let speed_rate: usize = STANDARD_FREQUENCY / frequency as usize;
+    assert!(speed_rate <= 65536usize);
+    let bytes = speed_rate.to_le_bytes();
+    unsafe {
+        port1.write(0x34u8);
+        port2.write(bytes[0]);
+        port2.write(bytes[1]);
+    }
+}
+
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
@@ -64,6 +88,7 @@ lazy_static! {
         }
         idt[usize::from(TIMER_INTERRUPT_ID)].set_handler_fn(timer_interrupt_handler);
         idt[usize::from(KEYBOARD_INTERRUPT_ID)].set_handler_fn(keyboard_interrupt_handler);
+        set_clock_speed(1000);
         idt
     };
 }
